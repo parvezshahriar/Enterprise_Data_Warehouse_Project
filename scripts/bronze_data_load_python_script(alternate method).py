@@ -1,13 +1,16 @@
+
 import os
 import psycopg2
 from psycopg2 import sql
+import datetime
 
 
 DB_CONFIG = {
-    "dbname": "your_db",
+    "dbname": "test",
     "user": "user",
-    "password": "pwd",
-    "host": "localhost"
+    "password": "password",
+    "host": "localhost",
+    "port": ****
 }
 
 
@@ -105,35 +108,53 @@ def load_files():
                 )
 
                 # -------------------------------------------------
-                # 2. Load CSV into PostgreSQL
+                # 2. Load CSV into PostgreSQL (WITH FILE_SOURCE)
                 # -------------------------------------------------
+                
+                # Capture the exact time processing started
+                start_time = datetime.datetime.now()
 
-                column_list = sql.SQL(", ").join(
-                    sql.Identifier(column)
-                    for column in config["columns"]
+                # Create a comma-separated string of the columns for our SQL queries
+                column_list_str = ", ".join(config["columns"])
+
+                # A. Create a temporary table that mirrors the target table
+                cur.execute(
+                    f"CREATE TEMP TABLE temp_load (LIKE {config['table']} EXCLUDING DEFAULTS) ON COMMIT DROP"
                 )
 
-                copy_sql = sql.SQL(
-                    """
-                    COPY {} ({})
+                # B. Build the COPY SQL to load the CSV into the TEMP table
+                copy_sql = f"""
+                    COPY temp_load ({column_list_str})
                     FROM STDIN
-                    WITH (
-                        FORMAT CSV,
-                        HEADER TRUE,
-                        DELIMITER ','
-                    )
-                    """
-                ).format(
-                    sql.SQL(config["table"]),
-                    column_list
-                )
+                    WITH (FORMAT CSV, HEADER TRUE, DELIMITER ',')
+                """
 
+                # Execute the COPY command from the file
                 with open(full_path, "r", encoding="utf-8") as f:
-                    cur.copy_expert(copy_sql.as_string(conn), f)
+                    cur.copy_expert(copy_sql, f)
+
+                # C. Insert from the temp table into the final table, manually appending the file_source
+                insert_sql = f"""
+                    INSERT INTO {config['table']} ({column_list_str}, file_source, ingestion_timestamp)
+                    SELECT {column_list_str}, %s, NOW()
+                    FROM temp_load
+                """
+                
+                # Execute the insert, passing the file_name as a parameter
+                cur.execute(insert_sql, (file_name,))
+                
+                # Capture how many rows were just inserted
+                rows_loaded = cur.rowcount
+                
+                # D. Clean up the temp table for the next file
+                cur.execute("DROP TABLE temp_load")
 
                 # -------------------------------------------------
-                # 3. Log successful processing
+                # 3. Log successful processing with metrics
                 # -------------------------------------------------
+                
+                # Capture the exact time processing finished
+                end_time = datetime.datetime.now()
 
                 cur.execute(
                     """
@@ -142,14 +163,20 @@ def load_files():
                         source_system,
                         table_name,
                         file_name,
-                        status
+                        status,
+                        started_at,
+                        completed_at,
+                        rows_loaded
                     )
-                    VALUES (%s, %s, %s, 'SUCCESS')
+                    VALUES (%s, %s, %s, 'SUCCESS', %s, %s, %s)
                     """,
                     (
                         config["source_system"],
                         config["table"],
-                        file_name
+                        file_name,
+                        start_time,
+                        end_time,
+                        rows_loaded
                     )
                 )
 

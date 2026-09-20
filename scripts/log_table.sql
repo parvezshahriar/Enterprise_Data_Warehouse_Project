@@ -11,3 +11,9 @@ CREATE TABLE control.file_processing_log (
     CONSTRAINT uq_file_processing
         UNIQUE (source_system, table_name, file_name)
 );
+
+CREATE TABLE control.etl_watermark (
+    table_name VARCHAR(100) PRIMARY KEY,
+    last_loaded_timestamp TIMESTAMP NOT NULL,
+    updated_at TIMESTAMP DEFAULT NOW()
+);

@@ -10,36 +10,57 @@ Unlike traditional full-load ETL pipelines that truncate and rebuild tables on e
 ## 🏗️ Architecture & Pipeline Flow
 
 ```mermaid
-graph TD
-    subgraph Data Sources - CSV Drops
-        A1[CRM: cust_info.csv] 
-        A2[CRM: prd_info.csv]
-        A3[CRM: sales_details.csv]
-        B1[ERP: CUST_AZ12.csv]
-        B2[ERP: LOC_A101.csv]
-        B3[ERP: PX_CAT_G1V2.csv]
+flowchart TD
+
+    subgraph Sources["Data Sources - CSV Drops"]
+        A1["CRM: cust_info.csv"]
+        A2["CRM: prd_info.csv"]
+        A3["CRM: sales_details.csv"]
+        B1["ERP: CUST_AZ12.csv"]
+        B2["ERP: LOC_A101.csv"]
+        B3["ERP: PX_CAT_G1V2.csv"]
     end
 
-    subgraph Phase 1: Bronze Ingestion - Pure SQL
-        C[pg_ls_dir File Scanner] -->|Check Unprocessed Files| D{(control.file_processing_log)}
-        A1 & A2 & A3 & B1 & B2 & B3 -->|COPY Delta Files| C
-        D -->|New Files Only| E[(Bronze Raw Tables + file_source + ingestion_timestamp)]
+    subgraph Bronze["Phase 1: Bronze Ingestion - Pure SQL"]
+        C["pg_ls_dir File Scanner"]
+        D{"Check control.file_processing_log"}
+        E[("Bronze Raw Tables + file_source + ingestion_timestamp")]
+
+        A1 -->|COPY Delta Files| C
+        A2 -->|COPY Delta Files| C
+        A3 -->|COPY Delta Files| C
+        B1 -->|COPY Delta Files| C
+        B2 -->|COPY Delta Files| C
+        B3 -->|COPY Delta Files| C
+
+        C -->|Check Unprocessed Files| D
+        D -->|New Files Only| E
     end
 
-    subgraph Phase 2: Silver Transformation - Incremental MERGE
-        E -->|Extract Delta: ingestion_timestamp > watermark| F[PL/pgSQL Incremental Engine]
-        F -->|PostgreSQL MERGE / Upsert| G[(Silver Cleansed & Standardized Tables)]
-        F -->|Update High Watermark| H[(control.etl_watermark)]
+    subgraph Silver["Phase 2: Silver Transformation - Incremental MERGE"]
+        F["PL/pgSQL Incremental Engine"]
+        G[("Silver Cleansed & Standardized Tables")]
+        H[("control.etl_watermark")]
+
+        E -->|Extract Delta: ingestion_timestamp > watermark| F
+        F -->|PostgreSQL MERGE / Upsert| G
+        F -->|Update High Watermark| H
     end
 
-    subgraph Phase 3: Gold Business Modeling
-        G --> I[Star Schema Models]
-        I --> J[REFRESH MATERIALIZED VIEW gold.fact_sales]
+    subgraph Gold["Phase 3: Gold Business Modeling"]
+        I["Star Schema Models"]
+        J[("REFRESH MATERIALIZED VIEW gold.fact_sales")]
+
+        G --> I
+        I --> J
     end
 
-    subgraph Downstream Analytics
-        J --> K[[Power BI Dashboards]]
-        J --> L[[Ad-Hoc SQL Analysis]]
+    subgraph Analytics["Downstream Analytics"]
+        K[["Power BI Dashboards"]]
+        L[["Ad-Hoc SQL Analysis"]]
+
+        J --> K
+        J --> L
     end
 
     style C fill:#1ba1e2,stroke:#006EAF,color:#fff
